@@ -130,6 +130,24 @@ them is worse than refusing the request.
   change this without much argument if callers were unreliable networks rather
   than services.
 
+**`REVERSED` is a status here, and would be an offsetting entry in a real ledger.**
+A production system would leave the completed record untouched and post a *new*
+linked record for the money coming back. Reconciliation needs two dated events -
+money left on the 3rd, came back on the 5th - not one row whose ending state
+hides when the reversal happened, and a status flag cannot express a partial
+reversal. I kept it as a status because this API exposes a single transaction
+resource with no field to link one record to another, and because a `COMPLETED`
+state with nowhere to go leaves a transition table with nothing in it worth
+testing. It is a deliberate simplification of the ledger model, not an oversight
+about how reversals work.
+
+**`REVERSED` and `REFUND` are not the same undo.** A `REFUND` is a new
+transaction: the customer is legitimately owed money back, and both movements
+genuinely happened. A reversal says the original movement should never have
+stood - an error, a duplicate posting, a settlement that failed after the
+transaction was marked complete - so it is recorded against the transaction that
+was wrong rather than as a fresh business event.
+
 **Where these rules live:** on the `TransactionStatus` enum, where each constant
 holds its own set of permitted successors, and enforced by
 `Transaction.changeStatusTo()`. Because that method is the only way to alter a
@@ -353,6 +371,17 @@ Named honestly rather than hidden.
     `@Transactional` method the entity is managed and Hibernate's dirty checking
     would persist the change anyway. I left the explicit `save()` because it
     makes the intent readable at the call site, but it is not doing any work.
+
+11. **A transaction reports two different timestamps depending on how you read
+    it.** `Instant.now()` has nanosecond precision, but H2 stores `TIMESTAMP` at
+    microsecond precision, so the value in the create response is not the value
+    the database gives back. A transaction created at `...710593600Z` is fetched
+    as `...710594Z`. Nothing is lost that matters here, but a client that keeps
+    the timestamp from a create and later compares it against a fetch will see a
+    mismatch. I found this with `curl` rather than with a test - the suite never
+    compares a create response against a subsequent read. The fix is to truncate
+    at creation (`Instant.now().truncatedTo(ChronoUnit.MICROS)`) so the object
+    and the row agree, or to return the re-read entity.
 
 ## 9. What I would do next, in priority order
 
